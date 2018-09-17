@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/common"
+OPTIND=1
+while getopts a:p: OPT; do
+  case "$OPT" in
+    a)
+      common_arch="$OPTARG"
+      ;;
+    p)
+      common_prefix="$OPTARG"
+      ;;
+    ?)
+      exit 2
+      ;;
+  esac
+done
+shift "$(($OPTIND - 1))"
+common_setup
+export PATH="${common_ctng_bin_dir}:${PATH}"
+CFLAGS="-ggdb3 -mcpu=${common_mcpu} -O0"
+mkdir -p "${common_samples_out_dir}"
+"${common_prefix}-gcc" ${CFLAGS} -c -o "${common_samples_out_dir}/main.o" "${common_root_dir}/main.c"
+"${common_prefix}-gcc" ${CFLAGS} -c -o "${common_samples_out_dir}/startup.o" -std=c99 "${common_root_dir}/startup_${common_arch}.S"
+"${common_prefix}-gcc" ${CFLAGS} -c -nostartfiles -o "${common_samples_out_dir}/syscalls.o" "${common_root_dir}/syscalls.c"
+"${common_prefix}-gcc" \
+  ${CFLAGS} \
+  -ggdb3 \
+  -nostartfiles \
+  -o "$common_elf" \
+  -T"${common_root_dir}/link.ld" \
+  "${common_samples_out_dir}/startup.o" \
+  "${common_samples_out_dir}/main.o" \
+  "${common_samples_out_dir}/syscalls.o" \
+;
+"${common_prefix}-objcopy" -O binary "$common_elf" "$common_bin"

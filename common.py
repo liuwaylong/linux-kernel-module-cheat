@@ -29,6 +29,7 @@ bench_boot = os.path.join(out_dir, 'bench-boot.txt')
 dl_dir = os.path.join(out_dir, 'dl')
 submodules_dir = os.path.join(root_dir, 'submodules')
 buildroot_src_dir = os.path.join(submodules_dir, 'buildroot')
+crosstool_ng_src_dir = os.path.join(submodules_dir, 'crosstool-ng')
 gem5_default_src_dir = os.path.join(submodules_dir, 'gem5')
 linux_src_dir = os.path.join(submodules_dir, 'linux')
 extract_vmlinux = os.path.join(linux_src_dir, 'scripts', 'extract-vmlinux')
@@ -96,6 +97,10 @@ def get_argparse(default_args=None, argparse_args=None):
     parser.add_argument(
         '-a', '--arch', choices=arch_choices, default='x86_64',
         help='CPU architecture. Default: %(default)s'
+    )
+    parser.add_argument(
+        '--crosstool-ng-build-id', default=default_build_id,
+        help='Crosstool-NG build ID. Allows you to keep multiple separate crosstool-NG builds. Default: %(default)s'
     )
     parser.add_argument(
         '-g', '--gem5', default=False, action='store_true',
@@ -227,6 +232,14 @@ def github_make_request(
 
 def log_error(msg):
     print('error: {}'.format(msg), file=sys.stderr)
+
+def mkdir():
+    global this
+    os.makedirs(this.build_dir, exist_ok=True)
+    os.makedirs(this.gem5_build_dir, exist_ok=True)
+    os.makedirs(this.gem5_run_dir, exist_ok=True)
+    os.makedirs(this.qemu_run_dir, exist_ok=True)
+    os.makedirs(this.p9_dir, exist_ok=True)
 
 def print_cmd(cmd, cmd_file=None, extra_env=None):
     '''
@@ -362,6 +375,7 @@ def run_cmd(
     # https://stackoverflow.com/questions/15535240/python-popen-write-to-stdout-and-log-file-simultaneously/52090802#52090802
     with subprocess.Popen(cmd, stdout=stdout, stderr=stderr, env=env, **kwargs) as proc:
         if out_file is not None:
+            os.makedirs(os.path.split(os.path.abspath(out_file))[0], exist_ok=True)
             with open(out_file, 'bw') as logfile:
                 while True:
                     byte = proc.stdout.read(1)
@@ -430,6 +444,13 @@ def setup(parser):
     this.gem5_build_build_dir = os.path.join(this.gem5_build_dir, 'build')
     this.gem5_executable = os.path.join(this.gem5_build_build_dir, gem5_arch, 'gem5.{}'.format(args.gem5_build_type))
     this.gem5_system_dir = os.path.join(this.gem5_build_dir, 'system')
+    this.crosstool_ng_out_dir = os.path.join(this.out_dir, 'crosstool-ng', args.crosstool_ng_build_id)
+    this.crosstool_ng_defconfig = os.path.join(this.crosstool_ng_src_dir, 'defconfig')
+    this.crosstool_ng_build_dir = os.path.join(this.crosstool_ng_out_dir, args.arch)
+    this.crosstool_ng_util_dir = os.path.join(this.crosstool_ng_out_dir, 'util')
+    this.crosstool_ng_config = os.path.join(this.crosstool_ng_util_dir, '.config')
+    this.crosstool_ng_executable = os.path.join(this.crosstool_ng_util_dir, 'ct-ng')
+    this.crosstool_ng_work_dir = os.path.join(this.crosstool_ng_out_dir, 'work')
     if args.gem5_worktree is not None:
         this.gem5_src_dir = os.path.join(this.gem5_non_default_src_root_dir, args.gem5_worktree)
     else:
@@ -472,10 +493,18 @@ def setup(parser):
         this.gdb_port = this.qemu_gdb_port
     return args
 
-def mkdir():
-    global this
-    os.makedirs(this.build_dir, exist_ok=True)
-    os.makedirs(this.gem5_build_dir, exist_ok=True)
-    os.makedirs(this.gem5_run_dir, exist_ok=True)
-    os.makedirs(this.qemu_run_dir, exist_ok=True)
-    os.makedirs(this.p9_dir, exist_ok=True)
+def write_configs(config_path, configs, config_fragments=None):
+    """
+    Write extra configs into the Buildroot config file.
+    TODO Can't get rid of these for now with nice fragments:
+    http://stackoverflow.com/questions/44078245/is-it-possible-to-use-config-fragments-with-buildroots-config
+    """
+    if config_fragments is None:
+        config_fragments = []
+    with open(config_path, 'a') as config_file:
+        for config_fragment in config_fragments:
+            with open(config_fragment, 'r') as config_fragment:
+                for line in config_fragment:
+                    config_file.write(line)
+        for config in configs:
+            config_file.write(config + '\n')
